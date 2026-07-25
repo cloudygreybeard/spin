@@ -1,0 +1,14 @@
+/spin
+*.exe
+dist/
+*.test
+*.out
+coverage.txt
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+go.work
+go.work.sum
