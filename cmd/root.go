@@ -39,21 +39,21 @@ var rootCmd = &cobra.Command{
 	Long: `spin reads items from positional arguments, stdin, or a file and randomly
 selects one, displaying the result with a spinning wheel that decelerates to a stop.
 
-The animation models a physical prize wheel with Coulomb friction. The
-inter-item delay follows exact rotational kinematics:
+The animation models a physical prize wheel with Coulomb friction and
+aerodynamic drag. The winner is determined by crypto/rand before the
+display begins.
 
-  v(t)  = v0 - alpha * t
-  dt[k] = ( sqrt(v0^2 - 2*alpha*k) - sqrt(v0^2 - 2*alpha*(k+1)) ) / alpha
-
-where v0 is proportional to force/mass and alpha is proportional to friction.
-
-The winner is determined by crypto/rand before the animation begins.`,
+Use --monte-carlo to run repeated trials and display a live histogram of
+the empirical distribution.`,
 	Example: `  spin apple banana cherry
   echo "apple banana cherry" | spin
   spin -f items.txt
   spin -f items.txt -s ","
   spin --force 2.0 --friction 0.1 red green blue
-  spin --start 3 a b c d e`,
+  spin --start 3 a b c d e
+  spin --fast-forward a b c d e
+  spin --monte-carlo 1000 a b c d e
+  spin --monte-carlo 500 --fast-forward a b c d e`,
 	Args:         cobra.ArbitraryArgs,
 	RunE:         runSpin,
 	SilenceUsage: true,
@@ -68,6 +68,8 @@ func init() {
 	rootCmd.Flags().Float64("friction", 0.2, "coefficient of kinetic friction (higher = faster stop)")
 	rootCmd.Flags().Float64("drag", 0.1, "aerodynamic drag coefficient (0 = pure Coulomb friction)")
 	rootCmd.Flags().DurationP("max-delay", "m", 500*time.Millisecond, "delay threshold at which the wheel stops")
+	rootCmd.Flags().IntP("monte-carlo", "n", 0, "run N trials and display a frequency histogram")
+	rootCmd.Flags().BoolP("fast-forward", "q", false, "skip the wheel animation (print result only)")
 }
 
 // Execute runs the root command.
@@ -84,24 +86,29 @@ func runSpin(cmd *cobra.Command, args []string) error {
 		return cmd.Help()
 	}
 
-	startIdx, err := parseStart(cmd)
-	if err != nil {
-		return err
+	trials, _ := cmd.Flags().GetInt("monte-carlo")
+	fastForward, _ := cmd.Flags().GetBool("fast-forward")
+
+	if trials > 0 {
+		return runMonteCarlo(cmd, items, trials, fastForward)
 	}
 
-	force, _ := cmd.Flags().GetFloat64("force")
-	mass, _ := cmd.Flags().GetFloat64("mass")
-	friction, _ := cmd.Flags().GetFloat64("friction")
-	drag, _ := cmd.Flags().GetFloat64("drag")
-	maxDelay, _ := cmd.Flags().GetDuration("max-delay")
+	return runSingle(cmd, items, fastForward)
+}
 
-	cfg := wheel.Config{
-		Force:    force,
-		Mass:     mass,
-		Friction: friction,
-		Drag:     drag,
-		MaxDelay: maxDelay,
-		Start:    startIdx,
+func runSingle(cmd *cobra.Command, items []string, fastForward bool) error {
+	if fastForward {
+		winner, err := wheel.Select(items)
+		if err != nil {
+			return err
+		}
+		fmt.Println(winner)
+		return nil
+	}
+
+	cfg, err := buildConfig(cmd)
+	if err != nil {
+		return err
 	}
 
 	winner, err := wheel.Spin(os.Stderr, items, cfg)
@@ -113,8 +120,54 @@ func runSpin(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// parseStart converts the --start flag value to a 0-indexed position
-// or -1 for "random".
+func runMonteCarlo(_ *cobra.Command, items []string, trials int, fastForward bool) error {
+	if trials <= 0 {
+		return fmt.Errorf("monte-carlo trials must be positive, got %d", trials)
+	}
+
+	hist := wheel.NewHistogram(items)
+
+	for i := range trials {
+		winner, err := wheel.Select(items)
+		if err != nil {
+			return err
+		}
+		hist.Record(winner)
+
+		if !fastForward || i == trials-1 {
+			hist.Render(os.Stderr, 70, i > 0)
+			if !fastForward {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+	}
+
+	hist.WriteTSV(os.Stdout)
+	return nil
+}
+
+func buildConfig(cmd *cobra.Command) (wheel.Config, error) {
+	startIdx, err := parseStart(cmd)
+	if err != nil {
+		return wheel.Config{}, err
+	}
+
+	force, _ := cmd.Flags().GetFloat64("force")
+	mass, _ := cmd.Flags().GetFloat64("mass")
+	friction, _ := cmd.Flags().GetFloat64("friction")
+	drag, _ := cmd.Flags().GetFloat64("drag")
+	maxDelay, _ := cmd.Flags().GetDuration("max-delay")
+
+	return wheel.Config{
+		Force:    force,
+		Mass:     mass,
+		Friction: friction,
+		Drag:     drag,
+		MaxDelay: maxDelay,
+		Start:    startIdx,
+	}, nil
+}
+
 func parseStart(cmd *cobra.Command) (int, error) {
 	s, _ := cmd.Flags().GetString("start")
 	if s == "random" {
@@ -130,10 +183,6 @@ func parseStart(cmd *cobra.Command) (int, error) {
 	return n - 1, nil
 }
 
-// readItems collects items from the first available source:
-//  1. --file flag
-//  2. positional arguments
-//  3. piped stdin
 func readItems(cmd *cobra.Command, args []string) ([]string, error) {
 	filePath, _ := cmd.Flags().GetString("file")
 	separator, _ := cmd.Flags().GetString("separator")
