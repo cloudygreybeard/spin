@@ -64,47 +64,83 @@ velocity is
 ```
 
 A heavier wheel starts more slowly for the same push, but once spinning,
-it decelerates at the same rate. It therefore covers fewer total
-revolutions before coming to rest.
+it decelerates at the same rate under Coulomb friction alone. It
+therefore covers fewer total revolutions before coming to rest.
 
-### 2.2 The discrete delay schedule
+### 2.2 Aerodynamic drag
+
+In practice, a spinning wheel is also subject to aerodynamic drag, which
+produces a retarding torque proportional to the angular velocity[^2][^3].
+Writing $\gamma$ for the drag coefficient, the drag torque is
+$\tau_{\text{drag}} = \gamma \omega$, and the resulting deceleration is
+$\gamma \omega / I$. Since $I \propto m$, the drag deceleration is
+inversely proportional to mass: a lighter wheel at the same angular
+velocity experiences the same drag torque but has less inertia to resist
+it.
+
+Combining Coulomb friction and drag, the equation of motion becomes
+
+```math
+\frac{dv}{dt} = -\alpha_c - \beta v \qquad \ldots\,(5)
+```
+
+where $\alpha_c$ is the Coulomb deceleration from equation (3) and
+$\beta = \gamma / m$. This is a first-order linear ODE with solution
+
+```math
+v(t) = \left(v_0 + \frac{\alpha_c}{\beta}\right) e^{-\beta t} - \frac{\alpha_c}{\beta} \qquad \ldots\,(6)
+```
+
+The velocity decays exponentially (governed by drag) towards a negative
+offset (governed by Coulomb friction). The wheel stops when $v = 0$, at
+time $t_{\text{stop}} = (1/\beta) \ln(1 + \beta v_0 / \alpha_c)$ ...(7).
+
+The inclusion of drag resolves an otherwise counter-intuitive consequence
+of the pure Coulomb model, in which a lighter wheel, pushed with the
+same force, spins for arbitrarily longer because mass cancels from the
+deceleration. With drag, the lighter wheel's higher initial velocity is
+met with proportionally greater aerodynamic braking, producing behaviour
+consistent with everyday experience: heavy flywheels coast, and light
+wheels stop. When $\beta = 0$, the model reduces to pure Coulomb
+friction and equations (5) and (6) simplify to constant deceleration.
+
+### 2.3 The discrete delay schedule
 
 In the programme, the continuous rotation of the wheel is represented by
 a sequence of discrete item positions. If there are $n$ items arranged
 around the wheel, the angular spacing between consecutive items is
 $2\pi / n$ radians. We define a linear velocity $v$ in units of items
-per second, so that the equations of motion become
-$v(t) = v_0 - \alpha t$ ...(5) and
-$\theta(t) = v_0 \, t - \frac{1}{2} \alpha \, t^2$ ...(6),
-where $\theta$ is now measured in items rather than radians and $\alpha$
-is scaled accordingly.
+per second, with $\alpha_c$ and $\beta$ scaled accordingly.
 
-The time at which the $k$-th item is reached is found by setting
-$\theta(t_k) = k$ in equation (6) and solving the resulting quadratic:
+The position traversed during a tick starting at velocity $v_k$ is found
+by integrating equation (6):
 
 ```math
-t_k = \frac{v_0 - \sqrt{v_0^2 - 2 \alpha k}}{\alpha} \qquad \ldots\,(7)
+\theta(\tau) = \frac{1}{\beta}\left(v_k + \frac{\alpha_c}{\beta}\right)\left(1 - e^{-\beta \tau}\right) - \frac{\alpha_c}{\beta}\tau \qquad \ldots\,(8)
 ```
 
-The delay between displaying the $k$-th item and the $(k+1)$-th is
-therefore
+The inter-item delay $\Delta t_k$ is the value of $\tau$ for which
+$\theta(\tau) = 1$. Because equation (8) involves both exponential and
+linear terms, the inverse has no closed form; the programme solves it by
+bisection to nanosecond precision. The velocity at the end of each tick
+is then used as the starting velocity for the next.
+
+The delays increase monotonically with $k$: since $v$ is strictly
+decreasing and positive, each successive tick starts from a lower
+velocity and therefore takes longer to complete. The wheel stops when it
+lacks sufficient kinetic energy to complete the next full item
+transition.
+
+When $\beta = 0$ (no drag), the position-time relation reduces to a
+quadratic and the delay admits the closed-form expression
 
 ```math
-\Delta t_k = \frac{\sqrt{v_0^2 - 2\alpha k} - \sqrt{v_0^2 - 2\alpha(k+1)}}{\alpha} \qquad \ldots\,(8)
+\Delta t_k = \frac{\sqrt{v_0^2 - 2\alpha_c k} - \sqrt{v_0^2 - 2\alpha_c(k+1)}}{\alpha_c} \qquad \ldots\,(9)
 ```
 
-This is the exact traversal time under constant deceleration. It
-increases monotonically with $k$, producing the characteristic slow-down
-of a real wheel: rapid ticking at first, with progressively longer
-pauses as the wheel approaches rest.
+which the programme uses in this case for efficiency.
 
-The wheel is considered stopped when it lacks sufficient kinetic energy
-to complete the next full item transition, that is, when
-$v_0^2 - 2\alpha(k+1) < 0$. This condition also serves to exclude
-partial-position ticks, which would otherwise violate the monotonicity of
-the delay schedule.
-
-### 2.3 Selection and fairness
+### 2.4 Selection and fairness
 
 The winning item is selected before the animation begins, using the
 cryptographically secure random number generator provided by the
@@ -115,7 +151,7 @@ ensuring that no item is favoured by modular bias.
 
 The display that follows is a deterministic rendering of this result.
 
-### 2.4 Modular arithmetic and the starting position
+### 2.5 Modular arithmetic and the starting position
 
 The items are arranged in a circular sequence of length $n$, indexed
 from $0$ to $n - 1$. After $T$ ticks from starting index $s$, the wheel
@@ -126,14 +162,14 @@ hashing, checksums, and circular buffer addressing.
 
 When the starting position is chosen automatically, it is set so that
 the animation lands on the winner:
-$s = (\text{winner} - (T \bmod n) + n) \bmod n$ ...(9).
+$s = (\text{winner} - (T \bmod n) + n) \bmod n$ ...(10).
 When the user supplies a starting position $p$ (1-indexed), it is
 converted to 0-indexed and taken modulo $n$. A small number of extra
 ticks at peak velocity are prepended to the delay schedule to satisfy the
 alignment condition. Physically, this is equivalent to a marginally
 harder push.
 
-### 2.5 Pipeline composability
+### 2.6 Pipeline composability
 
 The programme follows the Unix convention[^7], established by the tools
 described in Kernighan and Ritchie's *The C Programming Language*[^4]
@@ -193,7 +229,7 @@ the default parameters:
 spin Alice Bob Carol Dave Eve
 ```
 
-The wheel displays approximately 30 items over 1.6 seconds before
+The wheel displays approximately 27 items over 1.5 seconds before
 settling on the result.
 
 **Example 2.** The same selection, but the wheel is to start at the
@@ -222,7 +258,15 @@ approximately halves the number of displayed items, in agreement with the
 inverse relationship between $\alpha$ and the total traversal count
 $N = v_0^2 / (2\alpha)$.
 
-**Example 4.** Capturing the result in a shell variable for subsequent
+**Example 4.** Disabling drag to use the pure Coulomb friction model, or
+increasing it to simulate a wheel in a viscous medium:
+
+```bash
+spin --drag 0 red green blue yellow
+spin --drag 0.5 red green blue yellow
+```
+
+**Example 5.** Capturing the result in a shell variable for subsequent
 processing:
 
 ```bash
@@ -232,22 +276,24 @@ echo "The result is: $WINNER"
 
 ### 4.3 Physics parameters
 
-| Flag         | Default | Physical meaning                              |
-|--------------|---------|-----------------------------------------------|
-| `--force`    | 1.0     | Magnitude of the initial push (impulse)       |
-| `--mass`     | 1.0     | Mass of the wheel (affects inertia)           |
-| `--friction` | 0.2     | Coefficient of kinetic friction at the axle   |
-| `--max-delay`| 500ms   | Delay threshold at which the wheel stops      |
-| `--start`    | random  | Starting position (1-indexed, wraps mod $n$)  |
+| Flag         | Default | Physical meaning                                   |
+|--------------|---------|-----------------------------------------------------|
+| `--force`    | 1.0     | Magnitude of the initial push (impulse)              |
+| `--mass`     | 1.0     | Mass of the wheel (affects inertia and drag braking) |
+| `--friction` | 0.2     | Coefficient of kinetic friction at the axle          |
+| `--drag`     | 0.1     | Aerodynamic drag coefficient (0 = pure Coulomb)      |
+| `--max-delay`| 500ms   | Delay threshold at which the wheel stops             |
+| `--start`    | random  | Starting position (1-indexed, wraps mod $n$)         |
 
-The relationships between these parameters and the animation are
+The relationships between these parameters and the display are
 summarised in the following table:
 
-| Increase in parameter | Effect on $v_0$ | Effect on $\alpha$ | Effect on total items |
-|-----------------------|-----------------|--------------------|-----------------------|
-| Force                 | Increases       | No change          | Increases (as $F^2$)  |
-| Mass                  | Decreases       | No change          | Decreases (as $1/M^2$)|
-| Friction              | No change       | Increases          | Decreases (as $1/\mu$)|
+| Increase in parameter | Effect on $v_0$ | Effect on $\alpha_c$ | Effect on $\beta$ | Effect on total items      |
+|-----------------------|-----------------|----------------------|-------------------|----------------------------|
+| Force                 | Increases       | No change            | No change         | Increases                  |
+| Mass                  | Decreases       | No change            | Decreases         | Decreases (but drag helps) |
+| Friction              | No change       | Increases            | No change         | Decreases                  |
+| Drag                  | No change       | No change            | Increases         | Decreases                  |
 
 ## 5 Flags
 
@@ -258,6 +304,7 @@ summarised in the following table:
       --force float        spin force (default 1)
       --mass float         wheel mass (default 1)
       --friction float     coefficient of kinetic friction (default 0.2)
+      --drag float         aerodynamic drag coefficient (default 0.1)
   -m, --max-delay duration delay threshold at which the wheel stops (default 500ms)
   -h, --help               help for spin
 ```

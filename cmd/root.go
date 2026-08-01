@@ -66,6 +66,7 @@ func init() {
 	rootCmd.Flags().Float64("force", 1.0, "spin force (higher = faster initial spin)")
 	rootCmd.Flags().Float64("mass", 1.0, "wheel mass (higher = more inertia)")
 	rootCmd.Flags().Float64("friction", 0.2, "coefficient of kinetic friction (higher = faster stop)")
+	rootCmd.Flags().Float64("drag", 0.1, "aerodynamic drag coefficient (0 = pure Coulomb friction)")
 	rootCmd.Flags().DurationP("max-delay", "m", 500*time.Millisecond, "delay threshold at which the wheel stops")
 }
 
@@ -91,12 +92,14 @@ func runSpin(cmd *cobra.Command, args []string) error {
 	force, _ := cmd.Flags().GetFloat64("force")
 	mass, _ := cmd.Flags().GetFloat64("mass")
 	friction, _ := cmd.Flags().GetFloat64("friction")
+	drag, _ := cmd.Flags().GetFloat64("drag")
 	maxDelay, _ := cmd.Flags().GetDuration("max-delay")
 
 	cfg := wheel.Config{
 		Force:    force,
 		Mass:     mass,
 		Friction: friction,
+		Drag:     drag,
 		MaxDelay: maxDelay,
 		Start:    startIdx,
 	}

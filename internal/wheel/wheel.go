@@ -12,33 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package wheel implements a spinning wheel random-selection animation
+// Package wheel implements a spinning wheel random-selection display
 // grounded in rotational kinematics.
 //
 // # Physics model
 //
-// The animation models a uniform disc (prize wheel) subject to Coulomb
-// friction at a central axle bearing. Under constant friction torque the
-// angular deceleration is:
+// The wheel is a uniform disc subject to two retarding forces:
 //
-//	alpha = 2 * mu * g * r_axle / R^2
+//   - Coulomb friction at the axle bearing, producing a constant
+//     deceleration alpha_c = 2 * mu * g * r_axle / R^2. Mass cancels
+//     from this term.
 //
-// Mass cancels from the deceleration (I = 1/2 m R^2), so friction alone
-// governs how quickly the wheel slows. Mass does affect the initial
-// angular velocity for a given applied impulse:
+//   - Aerodynamic drag, producing a velocity-dependent deceleration
+//     (gamma / m) * v. Mass appears in the denominator: a lighter wheel
+//     at the same velocity experiences greater deceleration from drag.
 //
-//	v0 = impulse / I  ∝  Force / Mass
+// The combined equation of motion is:
 //
-// The inter-item delay follows directly from the position-time relation
-// theta(t) = v0*t - 1/2*alpha*t^2:
+//	dv/dt = -alpha_c - (gamma / m) * v
 //
-//	dt[k] = ( sqrt(v0^2 - 2*alpha*k) - sqrt(v0^2 - 2*alpha*(k+1)) ) / alpha
+// With the substitution beta = gamma / m, the solution is:
 //
-// This yields a physically accurate deceleration curve: rapid at first,
-// with progressively longer pauses as the wheel approaches rest.
+//	v(t) = (v0 + alpha_c/beta) * exp(-beta*t) - alpha_c/beta
 //
-// The winner is selected uniformly at random using crypto/rand before the
-// animation begins; the visual spin reveals a predetermined result.
+// The inter-item delay is computed by numerical bisection, since the
+// position-time integral has no closed-form inverse. When beta = 0
+// (no drag), the model reduces to pure Coulomb friction and the
+// closed-form expression is used.
+//
+// The winner is selected uniformly at random using crypto/rand before
+// the display begins; the visual spin reveals a predetermined result.
 package wheel
 
 import (
@@ -54,8 +57,8 @@ import (
 
 const (
 	// Scaling factors calibrated so default parameters (Force=1, Mass=1,
-	// Friction=0.2) produce ~30 ticks, a ~29 ms initial delay, and a
-	// ~153 ms final delay for a natural-feeling animation.
+	// Friction=0.2, Drag=0.1) produce ~27 ticks with a natural-feeling
+	// deceleration curve.
 	baseVelocity     = 35.0  // items/s at Force=1, Mass=1
 	baseDeceleration = 100.0 // items/s^2 at Friction=1
 )
@@ -69,21 +72,25 @@ type Config struct {
 	Force float64
 
 	// Mass is the wheel's mass (default 1.0). Higher values increase
-	// the moment of inertia, reducing the initial angular velocity for
-	// a given force. In the Coulomb friction model mass cancels from
-	// the deceleration rate, so it affects only how far the wheel
-	// spins, not how quickly it slows.
+	// the moment of inertia, reducing the initial angular velocity
+	// for a given force. Mass also appears in the drag term: a
+	// heavier wheel experiences less drag deceleration per unit
+	// velocity, so it coasts longer.
 	Mass float64
 
 	// Friction is the coefficient of kinetic friction at the axle
 	// bearing (default 0.2). Higher values increase the constant
-	// deceleration, causing the wheel to stop sooner. Typical real
-	// values range from 0.05 (well-oiled bearing) to 0.5 (dry axle).
+	// (Coulomb) deceleration, causing the wheel to stop sooner.
 	Friction float64
 
+	// Drag is the aerodynamic drag coefficient (default 0.1). It
+	// contributes a velocity-dependent deceleration of (Drag/Mass)*v,
+	// which dominates at high angular velocities and diminishes as
+	// the wheel slows. Set to 0 for pure Coulomb friction.
+	Drag float64
+
 	// MaxDelay is the inter-item delay at which the wheel is
-	// considered stopped (default 500 ms). It maps to a minimum
-	// velocity threshold: v_min = 1 / MaxDelay.
+	// considered stopped (default 500 ms).
 	MaxDelay time.Duration
 
 	// Start is the 0-indexed starting position in the item list.
@@ -98,7 +105,7 @@ type Config struct {
 }
 
 // Spin selects a uniformly random item from items and displays a spinning
-// wheel animation on w that decelerates to a stop on the selected item.
+// wheel on w that decelerates to a stop on the selected item.
 // It returns the selected item.
 func Spin(w io.Writer, items []string, cfg Config) (string, error) {
 	n := len(items)
@@ -114,19 +121,23 @@ func Spin(w io.Writer, items []string, cfg Config) (string, error) {
 	if cfg.Friction <= 0 {
 		return "", fmt.Errorf("friction must be positive, got %v", cfg.Friction)
 	}
+	if cfg.Drag < 0 {
+		return "", fmt.Errorf("drag must be non-negative, got %v", cfg.Drag)
+	}
 	if cfg.MaxDelay <= 0 {
 		return "", fmt.Errorf("max delay must be positive, got %v", cfg.MaxDelay)
 	}
 
 	v0 := baseVelocity * cfg.Force / cfg.Mass
-	alpha := baseDeceleration * cfg.Friction
+	alphac := baseDeceleration * cfg.Friction
+	beta := cfg.Drag / cfg.Mass
 
 	winnerIdx, err := secureRandomInt(n)
 	if err != nil {
 		return "", fmt.Errorf("selecting winner: %w", err)
 	}
 
-	delays := delaySchedule(v0, alpha, cfg.MaxDelay.Seconds())
+	delays := delaySchedule(v0, alphac, beta, cfg.MaxDelay.Seconds())
 	totalTicks := len(delays)
 
 	if totalTicks == 0 {
@@ -138,9 +149,6 @@ func Spin(w io.Writer, items []string, cfg Config) (string, error) {
 	startIdx := alignStart(cfg.Start, winnerIdx, totalTicks, n)
 
 	if cfg.Start >= 0 {
-		// User-specified start: prepend extra ticks at peak velocity
-		// so the total advances still land on the winner. Physically
-		// equivalent to a marginally harder push.
 		extra := ((winnerIdx - startIdx - totalTicks%n) % n + n) % n
 		if extra > 0 {
 			dt := time.Duration(float64(time.Second) / v0)
@@ -163,7 +171,6 @@ func Spin(w io.Writer, items []string, cfg Config) (string, error) {
 		sleep(d)
 	}
 
-	// Settle: pad the final pause to MaxDelay for a consistent reveal.
 	if settle := cfg.MaxDelay - delays[len(delays)-1]; settle > 0 {
 		sleep(settle)
 	}
@@ -196,35 +203,87 @@ func ParseItems(raw, separator string) ([]string, error) {
 	return items, nil
 }
 
-// delaySchedule computes the inter-item delay for each tick of a wheel
-// decelerating from initial velocity v0 (items/s) with constant angular
-// deceleration alpha (items/s^2). The schedule stops when the computed
-// delay exceeds maxDelaySec or the wheel lacks sufficient energy to
-// complete the next full position traversal.
+// delaySchedule dispatches to the appropriate delay computation based
+// on whether aerodynamic drag is present (beta > 0) or absent.
+func delaySchedule(v0, alphac, beta, maxDelaySec float64) []time.Duration {
+	if beta < 1e-12 {
+		return delayScheduleCoulomb(v0, alphac, maxDelaySec)
+	}
+	return delayScheduleDrag(v0, alphac, beta, maxDelaySec)
+}
+
+// delayScheduleCoulomb computes delays under pure Coulomb friction
+// (constant deceleration). Each delay is the exact traversal time
+// between consecutive positions:
 //
-// Each delay is the exact traversal time between consecutive discrete
-// positions under constant deceleration:
-//
-//	dt[k] = ( sqrt(v0^2 - 2*alpha*k) - sqrt(v0^2 - 2*alpha*(k+1)) ) / alpha
-//
-// Only ticks with enough kinetic energy for a full position change are
-// included. This preserves the monotonically increasing delay property
-// (provably: the delay function is decreasing in the velocity squared).
-func delaySchedule(v0, alpha, maxDelaySec float64) []time.Duration {
+//	dt[k] = ( sqrt(v0^2 - 2*ac*k) - sqrt(v0^2 - 2*ac*(k+1)) ) / ac
+func delayScheduleCoulomb(v0, ac, maxDelaySec float64) []time.Duration {
 	v0sq := v0 * v0
 	var delays []time.Duration
 	for k := 0; ; k++ {
-		disc := v0sq - 2*alpha*float64(k)
-		discNext := v0sq - 2*alpha*float64(k+1)
+		disc := v0sq - 2*ac*float64(k)
+		discNext := v0sq - 2*ac*float64(k+1)
 		if disc <= 0 || discNext < 0 {
 			break
 		}
-		dt := (math.Sqrt(disc) - math.Sqrt(discNext)) / alpha
+		dt := (math.Sqrt(disc) - math.Sqrt(discNext)) / ac
 		if dt > maxDelaySec {
 			break
 		}
 		delays = append(delays, time.Duration(dt*float64(time.Second)))
 	}
+	return delays
+}
+
+// delayScheduleDrag computes delays under combined Coulomb friction and
+// aerodynamic drag. The velocity during each tick evolves as:
+//
+//	v(tau) = (v_k + ac/beta) * exp(-beta*tau) - ac/beta
+//
+// and the position traversed is:
+//
+//	theta(tau) = (v_k + ac/beta)/beta * (1 - exp(-beta*tau)) - (ac/beta)*tau
+//
+// Each delay is found by bisection on theta(dt) = 1.
+func delayScheduleDrag(v0, ac, beta, maxDelaySec float64) []time.Duration {
+	var delays []time.Duration
+	v := v0
+	acOverBeta := ac / beta
+
+	for v > 1e-9 {
+		a := v + acOverBeta
+
+		// Time for velocity to reach zero from current v.
+		tStop := math.Log(1+beta*v/ac) / beta
+
+		// Maximum distance traversable before the wheel stops.
+		thetaMax := a/beta*(1-math.Exp(-beta*tStop)) - acOverBeta*tStop
+		if thetaMax < 1.0 {
+			break
+		}
+
+		// Bisect for dt such that theta(dt) = 1.
+		lo, hi := 0.0, tStop
+		for i := 0; i < 100 && hi-lo > 1e-9; i++ {
+			mid := (lo + hi) / 2
+			theta := a/beta*(1-math.Exp(-beta*mid)) - acOverBeta*mid
+			if theta < 1.0 {
+				lo = mid
+			} else {
+				hi = mid
+			}
+		}
+		dt := (lo + hi) / 2
+
+		if dt > maxDelaySec {
+			break
+		}
+
+		delays = append(delays, time.Duration(dt*float64(time.Second)))
+
+		v = a*math.Exp(-beta*dt) - acOverBeta
+	}
+
 	return delays
 }
 
