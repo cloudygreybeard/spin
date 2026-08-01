@@ -184,6 +184,21 @@ spin -f nominees.txt | xargs notify-send
 The animation appears on the terminal (via stderr) while only the
 selected item passes through the pipe (via stdout).
 
+### 2.7 Monte Carlo verification
+
+A Monte Carlo simulation consists of repeated independent random trials
+used to estimate a quantity that may be difficult to compute
+analytically[^5][^6]. Here, the quantity of interest is the probability
+distribution over the item set. Since each trial selects uniformly at
+random from $n$ items, the expected frequency of each item after $N$
+trials is $N/n$. By the law of large numbers, the empirical frequencies
+converge to the true (uniform) probabilities as $N \to \infty$.
+
+The `--monte-carlo` flag runs $N$ independent trials and displays a
+live-updating histogram of the accumulated results. This provides a
+visual proof of fairness: with sufficient trials, all bars should
+converge to equal length.
+
 ## 3 Installation
 
 ### Homebrew (macOS and Linux)
@@ -266,13 +281,33 @@ spin --drag 0 red green blue yellow
 spin --drag 0.5 red green blue yellow
 ```
 
-**Example 5.** Capturing the result in a shell variable for subsequent
-processing:
+**Example 5.** Selecting without the wheel display, printing only the
+result:
 
 ```bash
-WINNER=$(echo "heads tails" | spin)
-echo "The result is: $WINNER"
+spin --fast-forward Alice Bob Carol Dave Eve
 ```
+
+**Example 6.** Running a Monte Carlo simulation of 1000 trials to verify
+the uniformity of the distribution. The histogram updates live on the
+terminal; the final frequency table is written to stdout:
+
+```bash
+spin --monte-carlo 1000 --fast-forward a b c d e
+```
+
+With five items and 1000 trials, each item should appear approximately
+200 times. The `--fast-forward` flag is recommended for large trial
+counts; without it, each trial displays the full wheel animation.
+
+**Example 7.** Capturing the frequency table for further analysis:
+
+```bash
+spin --monte-carlo 10000 --fast-forward a b c d e > results.tsv
+```
+
+The TSV output contains one row per item with the count and percentage,
+suitable for piping to `sort`, `awk`, or a plotting tool.
 
 ### 4.3 Physics parameters
 
@@ -298,15 +333,17 @@ summarised in the following table:
 ## 5 Flags
 
 ```
-  -f, --file string        path to input file
-  -s, --separator string   item separator regex (default: whitespace)
-      --start string       starting position (1-indexed, wraps via modulo) or "random" (default "random")
-      --force float        spin force (default 1)
-      --mass float         wheel mass (default 1)
-      --friction float     coefficient of kinetic friction (default 0.2)
-      --drag float         aerodynamic drag coefficient (default 0.1)
-  -m, --max-delay duration delay threshold at which the wheel stops (default 500ms)
-  -h, --help               help for spin
+  -f, --file string          path to input file
+  -s, --separator string     item separator regex (default: whitespace)
+      --start string         starting position (1-indexed, wraps via modulo) or "random" (default "random")
+      --force float          spin force (default 1)
+      --mass float           wheel mass (default 1)
+      --friction float       coefficient of kinetic friction (default 0.2)
+      --drag float           aerodynamic drag coefficient (default 0.1)
+  -m, --max-delay duration   delay threshold at which the wheel stops (default 500ms)
+  -n, --monte-carlo int      run N trials and display a frequency histogram
+  -q, --fast-forward         skip the wheel animation (print result only)
+  -h, --help                 help for spin
 ```
 
 ## 6 Development

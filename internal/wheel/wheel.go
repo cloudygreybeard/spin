@@ -287,6 +287,20 @@ func delayScheduleDrag(v0, ac, beta, maxDelaySec float64) []time.Duration {
 	return delays
 }
 
+// Select picks a uniformly random item from items using crypto/rand,
+// without any visual display. It is the fast path used by Monte Carlo
+// simulation and fast-forward mode.
+func Select(items []string) (string, error) {
+	if len(items) == 0 {
+		return "", fmt.Errorf("no items to select from")
+	}
+	idx, err := secureRandomInt(len(items))
+	if err != nil {
+		return "", fmt.Errorf("selecting item: %w", err)
+	}
+	return items[idx], nil
+}
+
 // alignStart returns the 0-indexed starting position so that after
 // totalTicks single-step advances through n items the wheel lands on
 // winnerIdx. If userStart >= 0 it is taken modulo n; otherwise the
