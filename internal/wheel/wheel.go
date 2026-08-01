@@ -63,6 +63,8 @@ const (
 	baseDeceleration = 100.0 // items/s^2 at Friction=1
 )
 
+var whitespaceRE = regexp.MustCompile(`\s+`)
+
 // Config controls the wheel's physics and starting position.
 type Config struct {
 	// Force is the magnitude of the initial push (default 1.0).
@@ -191,7 +193,7 @@ func ParseItems(raw, separator string) ([]string, error) {
 		}
 		parts = re.Split(raw, -1)
 	} else {
-		parts = regexp.MustCompile(`\s+`).Split(raw, -1)
+		parts = whitespaceRE.Split(raw, -1)
 	}
 
 	items := make([]string, 0, len(parts))
