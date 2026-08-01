@@ -51,7 +51,9 @@ func TestHistogramRenderContainsItems(t *testing.T) {
 	h.Record("charlie")
 
 	var buf bytes.Buffer
-	h.Render(&buf, 60, false)
+	if err := h.Render(&buf, 60, false); err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
 	output := buf.String()
 
 	for _, item := range []string{"alpha", "bravo", "charlie"} {
@@ -74,7 +76,9 @@ func TestHistogramRenderBarProportions(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	h.Render(&buf, 60, false)
+	if err := h.Render(&buf, 60, false); err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
 	output := buf.String()
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -96,7 +100,9 @@ func TestHistogramRenderOverwrite(t *testing.T) {
 	h.Record("x")
 
 	var buf bytes.Buffer
-	h.Render(&buf, 60, true)
+	if err := h.Render(&buf, 60, true); err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
 	output := buf.String()
 
 	if !strings.Contains(output, "\033[") {
@@ -109,7 +115,9 @@ func TestHistogramRenderNoOverwrite(t *testing.T) {
 	h.Record("x")
 
 	var buf bytes.Buffer
-	h.Render(&buf, 60, false)
+	if err := h.Render(&buf, 60, false); err != nil {
+		t.Fatalf("Render() error: %v", err)
+	}
 	output := buf.String()
 
 	if strings.Contains(output, "\033[") {
@@ -124,7 +132,9 @@ func TestHistogramWriteTSV(t *testing.T) {
 	h.Record("b")
 
 	var buf bytes.Buffer
-	h.WriteTSV(&buf)
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
 	output := buf.String()
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
@@ -132,7 +142,6 @@ func TestHistogramWriteTSV(t *testing.T) {
 		t.Fatalf("WriteTSV produced %d lines, want 3", len(lines))
 	}
 
-	// Line format: "item\tcount\tpct%"
 	if !strings.HasPrefix(lines[0], "a\t2\t") {
 		t.Errorf("line 0 = %q, want prefix \"a\\t2\\t\"", lines[0])
 	}
@@ -154,7 +163,9 @@ func TestHistogramWriteTSVPercentages(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	h.WriteTSV(&buf)
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
 	output := buf.String()
 
 	if !strings.Contains(output, "75.00%") {
@@ -162,6 +173,147 @@ func TestHistogramWriteTSVPercentages(t *testing.T) {
 	}
 	if !strings.Contains(output, "25.00%") {
 		t.Errorf("expected 25.00%% in output:\n%s", output)
+	}
+}
+
+func TestHistogramSortCountDesc(t *testing.T) {
+	h := NewHistogram([]string{"c", "a", "b"})
+	for range 10 {
+		h.Record("a")
+	}
+	for range 30 {
+		h.Record("b")
+	}
+	for range 20 {
+		h.Record("c")
+	}
+
+	h.SetSort(SortCountDesc)
+	var buf bytes.Buffer
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d", len(lines))
+	}
+	if !strings.HasPrefix(lines[0], "b\t") {
+		t.Errorf("first line should be b (most frequent), got %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[2], "a\t") {
+		t.Errorf("last line should be a (least frequent), got %q", lines[2])
+	}
+}
+
+func TestHistogramSortCountAsc(t *testing.T) {
+	h := NewHistogram([]string{"c", "a", "b"})
+	for range 10 {
+		h.Record("a")
+	}
+	for range 30 {
+		h.Record("b")
+	}
+	for range 20 {
+		h.Record("c")
+	}
+
+	h.SetSort(SortCountAsc)
+	var buf bytes.Buffer
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if !strings.HasPrefix(lines[0], "a\t") {
+		t.Errorf("first line should be a (least frequent), got %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[2], "b\t") {
+		t.Errorf("last line should be b (most frequent), got %q", lines[2])
+	}
+}
+
+func TestHistogramSortNameAsc(t *testing.T) {
+	h := NewHistogram([]string{"cherry", "apple", "banana"})
+	h.Record("cherry")
+	h.Record("apple")
+	h.Record("banana")
+
+	h.SetSort(SortNameAsc)
+	var buf bytes.Buffer
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if !strings.HasPrefix(lines[0], "apple\t") {
+		t.Errorf("first line should be apple, got %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[2], "cherry\t") {
+		t.Errorf("last line should be cherry, got %q", lines[2])
+	}
+}
+
+func TestHistogramSortNameDesc(t *testing.T) {
+	h := NewHistogram([]string{"cherry", "apple", "banana"})
+	h.Record("cherry")
+	h.Record("apple")
+	h.Record("banana")
+
+	h.SetSort(SortNameDesc)
+	var buf bytes.Buffer
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if !strings.HasPrefix(lines[0], "cherry\t") {
+		t.Errorf("first line should be cherry, got %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[2], "apple\t") {
+		t.Errorf("last line should be apple, got %q", lines[2])
+	}
+}
+
+func TestHistogramSortOriginalPreservesOrder(t *testing.T) {
+	h := NewHistogram([]string{"zebra", "apple", "mango"})
+	h.Record("apple")
+	h.Record("zebra")
+	h.Record("mango")
+
+	h.SetSort(SortOriginal)
+	var buf bytes.Buffer
+	if err := h.WriteTSV(&buf); err != nil {
+		t.Fatalf("WriteTSV() error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if !strings.HasPrefix(lines[0], "zebra\t") {
+		t.Errorf("first line should be zebra (original order), got %q", lines[0])
+	}
+}
+
+func TestParseSortOrder(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    SortOrder
+		wantErr bool
+	}{
+		{"original", SortOriginal, false},
+		{"", SortOriginal, false},
+		{"count", SortCountDesc, false},
+		{"count-desc", SortCountDesc, false},
+		{"count-asc", SortCountAsc, false},
+		{"name", SortNameAsc, false},
+		{"name-asc", SortNameAsc, false},
+		{"name-desc", SortNameDesc, false},
+		{"invalid", SortOriginal, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			got, err := ParseSortOrder(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseSortOrder(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ParseSortOrder(%q) = %v, want %v", tt.input, got, tt.want)
+			}
+		})
 	}
 }
 

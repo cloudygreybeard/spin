@@ -70,6 +70,8 @@ func init() {
 	rootCmd.Flags().DurationP("max-delay", "m", 500*time.Millisecond, "delay threshold at which the wheel stops")
 	rootCmd.Flags().IntP("monte-carlo", "n", 0, "run N trials and display a frequency histogram")
 	rootCmd.Flags().BoolP("fast-forward", "q", false, "skip the wheel animation (print result only)")
+	rootCmd.Flags().String("sort", "original", "histogram sort order: original, count[-desc|-asc], name[-asc|-desc]")
+	rootCmd.Flags().Bool("rank", false, "shorthand for --sort=count (most frequent first)")
 }
 
 // Execute runs the root command.
@@ -120,30 +122,41 @@ func runSingle(cmd *cobra.Command, items []string, fastForward bool) error {
 	return nil
 }
 
-func runMonteCarlo(_ *cobra.Command, items []string, trials int, fastForward bool) error {
-	if trials <= 0 {
-		return fmt.Errorf("monte-carlo trials must be positive, got %d", trials)
+func runMonteCarlo(cmd *cobra.Command, items []string, trials int, _ bool) error {
+	sortOrder, err := parseSortOrder(cmd)
+	if err != nil {
+		return err
 	}
 
-	hist := wheel.NewHistogram(items)
-
-	for i := range trials {
-		winner, err := wheel.Select(items)
-		if err != nil {
-			return err
-		}
-		hist.Record(winner)
-
-		if !fastForward || i == trials-1 {
-			hist.Render(os.Stderr, 70, i > 0)
-			if !fastForward {
-				time.Sleep(10 * time.Millisecond)
-			}
-		}
+	rendered := false
+	progress := func(h *wheel.Histogram) {
+		h.SetSort(sortOrder)
+		_ = h.Render(os.Stderr, 70, rendered)
+		rendered = true
 	}
 
-	hist.WriteTSV(os.Stdout)
+	hist, err := wheel.MonteCarlo(items, trials, progress)
+	if err != nil {
+		return err
+	}
+
+	hist.SetSort(sortOrder)
+	if err := hist.Render(os.Stderr, 70, rendered); err != nil {
+		return fmt.Errorf("rendering histogram: %w", err)
+	}
+	if err := hist.WriteTSV(os.Stdout); err != nil {
+		return fmt.Errorf("writing results: %w", err)
+	}
 	return nil
+}
+
+func parseSortOrder(cmd *cobra.Command) (wheel.SortOrder, error) {
+	rank, _ := cmd.Flags().GetBool("rank")
+	if rank {
+		return wheel.SortCountDesc, nil
+	}
+	s, _ := cmd.Flags().GetString("sort")
+	return wheel.ParseSortOrder(s)
 }
 
 func buildConfig(cmd *cobra.Command) (wheel.Config, error) {
