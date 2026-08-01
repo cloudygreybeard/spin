@@ -261,9 +261,10 @@ func TestDelayScheduleDragNarrowsMassGap(t *testing.T) {
 func TestDelayScheduleDragPreventsRunaway(t *testing.T) {
 	// The original problem case: mass=0.1, friction=0.01 with Coulomb
 	// only would produce ~61000 ticks. With drag, it should be bounded.
-	v0 := baseVelocity * 1.0 / 0.1   // 350
-	ac := baseDeceleration * 0.01     // 1
-	beta := 0.1 / 0.1                // 1
+	v0 := baseVelocity * 1.0 / 0.1 // 350
+	ac := baseDeceleration * 0.01   // 1
+	drag, mass := 0.1, 0.1
+	beta := drag / mass // 1.0
 
 	delays := delaySchedule(v0, ac, beta, 0.5)
 	if len(delays) > 500 {
